@@ -50,7 +50,7 @@ vi /cks/sa/pod1.yaml
 kubectl apply -f pod1.yaml
 kubectl get pod -n qa
 -------------------
-//this is the pod define file
+//this is the pod define file, we use seviceaccount named backend-sa in this pod file.
 apiVersion: v1
 kind: Pod
 metadata:
