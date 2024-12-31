@@ -1,0 +1,132 @@
+2022年CKS开始记录：
+https://www.cnblogs.com/myocp/p/15915123.html
+2024年4月CKS
+https://blog.csdn.net/pooopun/article/details/138262165
+
+----------------Q1 kube bench修复不安全项
+context： 针对kubeadm创建的cluster运行CIS基准测试工具时，发现多个必须立刻解决的问题。
+
+----------------Q2 pod指定serviceaccount
+问题：
+您组织的安全策略包括：
+1，serviceaccount不得挂载api凭据
+2，serviceaccount以-sa结尾
+清单文件/cks/sa/pod1.yaml中指定的pod由于serviceaccount指定错误而无法调度。
+请完成以下项目：
+1，在现有namespace qa中创建一个名为backend-sa的新serviceaccount。确保该sa不自动挂载api凭证。
+2，使用/cks/sa/pod1.yaml中的清单文件来创建一个pod。
+3，清理namespace qa中未使用的service account。
+
+vi qa-sa.yaml
+# 1、创建SA vim qa-sa.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backend-sa
+  namespace: qa
+automountServiceAccountToken: false  //在线文档搜索automountserviceaccounttoken关键字，找到config SA for pod章节，其中有这段代码。
+2，vi /cks/sa/pod1.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: backend
+  namespace: qa #注意命名空间是否正确
+spec:
+  serviceAccountName: backend-sa # 没有则添加一行，有则修改这一行为刚才创建的 ServiceAccount（考试时，默认已有这一行，需要修改。）
+  containers: 
+  - image: nginx:1.9
+    imagePullPolicy: IfNotPresent
+    name: backend
+3, 删除namespace qa中没有使用的sa
+kubectl get sa -n qa
+kubectl get pod -n qa -o yaml > grep -i serviceaccountname
+kubectl delete sa xxx -n qa
+
+
+
+Q14 podSecurityPolicy
+1, create PSP
+this feature has been removed.
+-----------------------Q15 api server authentication
+删除clusterrolebinding，取消匿名用户的集群管理员权限。
+kubectl delete clusterrolebinding system:anonymous
+---------Q16 image policy web hook
+https://developer.aliyun.com/article/1398152
+1, mkdir -p /etc/kubernetes/epconfig
+vim /etc/kubernetes/epconfig/admission_configuration.json
+//设置image的策略
+{
+  "imagePolicy": {
+     "kubeConfigFile": "/etc/kubernetes/kube-image-bouncer.yml",
+     "allowTTL": 50,
+     "denyTTL": 50,
+     "retryBackoff": 500,
+     "defaultAllow": true
+  }
+}
+
+2, vim /etc/kubernetes/epconfig/kubeconfig.yaml
+//是指集群和上下文。
+apiVersion: v1
+kind: Config
+# clusters refers to the remote service.
+clusters:
+- cluster:
+    certificate-authority: /etc/kubernetes/epconfig/external-cert.pem  # CA for verifying the remote service.
+    server: server  # URL of remote service to query. Must use 'https'.
+  name: image-checker
+contexts:
+- context:
+    cluster: image-checker
+    user: api-server
+  name: image-checker
+current-context: image-checker
+preferences: {}
+# users refers to the API server's webhook configuration.
+users:
+- name: api-server
+  user:
+    client-certificate: /etc/kubernetes/epconfig/apiserver-client-cert.pem     # cert for the webhook admission controller to use
+    client-key:  /etc/kubernetes/epconfig/apiserver-client-key.pem             # key matching the cert
+3，测试验证文件
+mkdir -p /cks/img/
+vim /cks/img/web1.yaml           //
+
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: nginx-latest
+spec:
+  replicas: 1
+  selector:
+    app: nginx-latest
+  template:
+    metadata:
+      name: nginx-latest
+      labels:
+        app: nginx-latest
+    spec:
+      containers:
+      - name: nginx-latest
+        image: nginx
+        ports:
+        - containerPort: 80
+-----------修改准入配置文件。
+1，vim /etc/kubernetes/epconfig/adminssion_configuration.json
+其中：defaultAllow: false
+----------修改kube配置文件
+1，vim /etc/kubernetes/epconfig/kubeconfig.yaml
+在cluster字段下，添加server字段：
+server: https://image-bouncer-webhook.default.svc:1323/image_policy
+----------修改api-server配置文件
+vim /etc/kubernetes/manifests/kube-apiserver.yaml
+//启用imagePolicyWebHook插件，确认--admission-control-config-file已经配置并mount
+--enable-admission-plugins=NodeRestriction,ImagePolicyWebhook
+--admission-control-config-file=/etc/kubernetes/epconfig/adminssion_configuration.json
+重启kubelet
+systemctl daemon-reload
+systemctl restart kubelet
+检查
+1，kubectl create -f /cks/img/web1.yaml
+kubectl describe rc nginx-latest
+在输出结果的最后event字段中，可以看到is forbidden。
