@@ -50,7 +50,7 @@ vi /cks/sa/pod1.yaml
 kubectl apply -f pod1.yaml
 kubectl get pod -n qa
 -------------------
-vi pod1.yaml
+//this is the pod define file
 apiVersion: v1
 kind: Pod
 metadata:
@@ -103,7 +103,7 @@ task
 1）kubectl describe rolebinding -n db
 2) kubectl get role -n db
 
-## 1)编辑role-1权限。
+## 1)编辑role-1权限。//activate immediately
 kubectl edit role role-1 -n db
 rules: 		 #模拟环境里要删除掉 null，然后添加以下内容。考试时，要根据实际情况修改。
 - apiGroups: [""] 
