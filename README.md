@@ -50,6 +50,7 @@ vi /cks/sa/pod1.yaml
 kubectl apply -f pod1.yaml
 kubectl get pod -n qa
 -------------------
+vi pod1.yaml
 apiVersion: v1
 kind: Pod
 metadata:
