@@ -6,18 +6,20 @@ CKS认证考试共有16道题目，我们针对这16道题目，结合K8S文档�
 # Q1 kube bench修复不安全项
 context： 针对kubeadm创建的cluster运行CIS基准测试工具时，发现多个必须立刻解决的问题。
 本题涉及到kube bench。
+--------------解题步骤
 ## 修改1：修改apiserver的配置文件。/etc/kubernetes/manifests/kube-apiserver.yaml文件
 --authorization-mode #修改为Node，RBAC
-## 修改2：修改kubelet配置文件 /var/lib/kubelet/config.yaml文件
+## 修改2：修改kubelet配置文件。 /var/lib/kubelet/config.yaml文件
 ![图片](https://github.com/user-attachments/assets/145892ed-c456-40ac-8072-991bf0a0ee2c)
 authentication.anonymous.enabled: false #修改为false后，允许匿名用户登录。
 authorization.mode: webhook #修改为webhook
 k8s在线文档对于kubelet认证和授权的介绍网页如下：
 https://kubernetes.io/docs/reference/access-authn-authz/kubelet-authn-authz/
 
-##修改3：修改/etc/kubernetes/manifests/etcd.yaml文件
+## 修改3：修改etcd的配置文件。 /etc/kubernetes/manifests/etcd.yaml文件
 ![图片](https://github.com/user-attachments/assets/b25010b5-de82-402b-88e3-0f2a07ed7845)
 - --client-cert-auth=true #修改为 true
+## 重启kubelet，生效修改
 systemctl daemon-reload
 systemctl restart kubelet
 
@@ -34,8 +36,8 @@ systemctl restart kubelet
 2，使用/cks/sa/pod1.yaml中的清单文件来创建一个pod。
 3，清理namespace qa中未使用的service account。
 
-
-## 1、创建SA vim qa-sa.yaml
+---------------解题步骤
+## 1、创建SA
 vi qa-sa.yaml
 kubectl apply -f qa-sa.yaml
 --------------
@@ -45,7 +47,7 @@ metadata:
   name: backend-sa
   namespace: qa
 automountServiceAccountToken: false  //在线文档搜索automountserviceaccounttoken关键字，找到config SA for pod章节，其中有这段代码。
-## 2，创建使用该sa的pod。
+## 2，创建使用该sa的pod。方法是在spec字段，添加serviceAccountName字段。
 vi /cks/sa/pod1.yaml
 kubectl apply -f pod1.yaml
 kubectl get pod -n qa
@@ -65,18 +67,18 @@ spec:
 ## 3, 删除namespace qa中没有使用的sa
 kubectl get sa -n qa
 kubectl get pod -n qa -o yaml > grep -i serviceaccountname  #找到所有的sa
-kubectl delete sa xxx -n qa
+kubectl delete sa xxx -n qa #删除除了backend-sa以外的sa
 
-# q3 默认网络策略
+# Q3 默认网络策略
 context：一个默认拒绝的网络策略可以避免在其他namespace中意外公开pod
 task：
 1，在namespace testing中，为所有类型为ingress+egress的流量创建名字为denypolicy的新默认拒绝网络策略。
 2，这个网络策略必须拒绝所有ingress+egress流量
 3，将这个网络策略应用到namespace testing中的所有pod上。
-解题步骤：
+----------------------------解题步骤：
 # 1）创建networkpolicy文件
 vi /cks/net/p1.yaml
-
+------------
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -90,21 +92,22 @@ spec:
 ## 2）kubectl apply -f p1.yaml
 ## 3）kubectl describe networkpolicy denypolicy -n testing
 
-#  q4 rbac rolebinding
-context: 绑定到pod的serviceaccount被授予了过度宽松的权限，完成以下项目以减少权限
-task
-1）1个名为web-pod的pod已经在namespace db中运行。
-2）编辑绑定到pod的serviceaccount service-account-web的role，仅允许对service类型的资源执行get操作。
+#  Q4 RBAC rolebinding
+context: 
+绑定到pod的serviceaccount被授予了过度宽松的权限，完成以下项目以减少权限
+task：
+1）1个名为web-pod的pod已经在namespace db中运行。//只是提示，不需要做操作。
+2）编辑绑定到pod的serviceaccount service-account-web的role，仅允许对service类型的资源执行get操作。//编辑role-1权限。
 3）在namespace db中创建一个role-2的role，只能对namespace资源执行delete操作。
 4）创建一个名字为role-2-binding的新binding，将创建的role绑定到pod的serviceaccount。
 注意：不要删除现有的rolebinding
-## 解题步骤：
+-------------------------解题步骤：
 准备工作
 1）kubectl describe rolebinding -n db
 2) kubectl get role -n db
 
 ## 1)编辑role-1权限。//activate immediately
-kubectl edit role role-1 -n db
+kubectl edit role role-1 -n db  //namespace db中只有这一个role。
 rules: 		 #模拟环境里要删除掉 null，然后添加以下内容。考试时，要根据实际情况修改。
 - apiGroups: [""] 
   resources: ["services"]
@@ -120,9 +123,81 @@ kubectl create rolebinding role-2-binding -n db --serviceaccount=db:service-acco
 1）日志存储到/var/log/kubernetes/audit-logs.txt
 2）日志能保留10天
 3）最多保留2个旧的日志文件
+## k8s文档
+https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/
+apiVersion: audit.k8s.io/v1 # 这是必填项。
+kind: Policy
+# 不要在 RequestReceived 阶段为任何请求生成审计事件。
+omitStages:
+  - "RequestReceived"
+rules:
+  # 在日志中用 RequestResponse 级别记录 Pod 变化。
+  # level关键字有哪些？
+  - level: RequestResponse
+    resources:
+    - group: ""
+      # 资源 "pods" 不匹配对任何 Pod 子资源的请求，
+      # 这与 RBAC 策略一致。
+      resources: ["pods"]
+  # 在日志中按 Metadata 级别记录 "pods/log"、"pods/status" 请求
+  - level: Metadata
+    resources:
+    - group: ""
+      resources: ["pods/log", "pods/status"]
+
+  # 不要在日志中记录对名为 "controller-leader" 的 configmap 的请求。
+  - level: None
+    resources:
+    - group: ""
+      resources: ["configmaps"]
+      resourceNames: ["controller-leader"]
+
+  # 不要在日志中记录由 "system:kube-proxy" 发出的对端点或服务的监测请求。
+  - level: None
+    users: ["system:kube-proxy"]
+    verbs: ["watch"]
+    resources:
+    - group: "" # core API 组
+      resources: ["endpoints", "services"]
+
+  # 不要在日志中记录对某些非资源 URL 路径的已认证请求。
+  - level: None
+    userGroups: ["system:authenticated"]
+    nonResourceURLs:
+    - "/api*" # 通配符匹配。
+    - "/version"
+
+  # 在日志中记录 kube-system 中 configmap 变更的请求消息体。
+  - level: Request
+    resources:
+    - group: "" # core API 组
+      resources: ["configmaps"]
+    # 这个规则仅适用于 "kube-system" 名字空间中的资源。
+    # 空字符串 "" 可用于选择非名字空间作用域的资源。
+    namespaces: ["kube-system"]
+
+  # 在日志中用 Metadata 级别记录所有其他名字空间中的 configmap 和 secret 变更。
+  - level: Metadata
+    resources:
+    - group: "" # core API 组
+      resources: ["secrets", "configmaps"]
+
+  # 在日志中以 Request 级别记录所有其他 core 和 extensions 组中的资源操作。
+  - level: Request
+    resources:
+    - group: "" # core API 组
+    - group: "extensions" # 不应包括在内的组版本。
+
+  # 一个抓取所有的规则，将在日志中以 Metadata 级别记录所有其他请求。
+  - level: Metadata
+    # 符合此规则的 watch 等长时间运行的请求将不会
+    # 在 RequestReceived 阶段生成审计事件。
+    omitStages:
+      - "RequestReceived"
+
 ##解答步骤：
 ## 1) ssh root@master
-## 2)配置审计策略
+## 2) 配置审计策略
 cp /etc/kubernetes/logpolicy/sample-policy.yaml /tmp
 vi sample-policy.yaml 插入以下内容
   - level: RequestRespone
@@ -133,7 +208,7 @@ vi sample-policy.yaml 插入以下内容
     resources:
     - group: ""
       resources: ["configmaps"] s
-    namespace: ["front-apps"]
+      namespace: ["front-apps"]
   - level: Metadata
     resources:
     - group: ""
