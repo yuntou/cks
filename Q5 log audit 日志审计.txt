@@ -1,0 +1,126 @@
+# Q5 log audit 日志审计
+************************
+task：
+在cluster中启用日志审计，并确保
+1）日志存储到/var/log/kubernetes/audit-logs.txt #这个路径需要添加到kube-apiserver.yaml文件中。
+2）日志能保留10天
+3）最多保留2个旧的日志文件
+/etc/kubernetes/logpolicy/sample-policy.yaml提供了基本策略，它仅指定不记录的内容。
+注意：基本策略位于cluster的master节点上。
+编辑和扩展基本策略，以实现：
+1）RequestResponse级别的persistentvolumes更改。
+2）namespace front-app中configmaps更改的请求体。
+3）metadata级别的所有namespace中的configmap和secret更改。
+此外，添加一个全方位的规则以在metadata级别记录所有其他请求。#这是第4个要求。
+注意：不要忘记记录修改后的策略。
+***************************
+## k8s文档中关于audit的内容
+https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/
+apiVersion: audit.k8s.io/v1 # 这是必填项。
+kind: Policy
+# 不要在 RequestReceived 阶段为任何请求生成审计事件。
+omitStages:
+  - "RequestReceived"
+rules:
+  # 在日志中用 RequestResponse 级别记录 Pod 变化。
+  # level关键字有哪些？
+  - level: RequestResponse
+    resources:
+    - group: ""
+      # 资源 "pods" 不匹配对任何 Pod 子资源的请求，
+      # 这与 RBAC 策略一致。
+      resources: ["pods"]
+  # 在日志中按 Metadata 级别记录 "pods/log"、"pods/status" 请求
+  - level: Metadata
+    resources:
+    - group: ""
+      resources: ["pods/log", "pods/status"]
+
+  # 不要在日志中记录对名为 "controller-leader" 的 configmap 的请求。
+  - level: None
+    resources:
+    - group: ""
+      resources: ["configmaps"]
+      resourceNames: ["controller-leader"]
+
+  # 不要在日志中记录由 "system:kube-proxy" 发出的对端点或服务的监测请求。
+  - level: None
+    users: ["system:kube-proxy"]
+    verbs: ["watch"]
+    resources:
+    - group: "" # core API 组
+      resources: ["endpoints", "services"]
+
+  # 不要在日志中记录对某些非资源 URL 路径的已认证请求。
+  - level: None
+    userGroups: ["system:authenticated"]
+    nonResourceURLs:
+    - "/api*" # 通配符匹配。
+    - "/version"
+
+  # 在日志中记录 kube-system 中 configmap 变更的请求消息体。
+  - level: Request
+    resources:
+    - group: "" # core API 组
+      resources: ["configmaps"]
+    # 这个规则仅适用于 "kube-system" 名字空间中的资源。
+    # 空字符串 "" 可用于选择非名字空间作用域的资源。
+    namespaces: ["kube-system"]
+
+  # 在日志中用 Metadata 级别记录所有其他名字空间中的 configmap 和 secret 变更。
+  - level: Metadata
+    resources:
+    - group: "" # core API 组
+      resources: ["secrets", "configmaps"]
+
+  # 在日志中以 Request 级别记录所有其他 core 和 extensions 组中的资源操作。
+  - level: Request
+    resources:
+    - group: "" # core API 组
+    - group: "extensions" # 不应包括在内的组版本。
+
+  # 一个抓取所有的规则，将在日志中以 Metadata 级别记录所有其他请求。
+  - level: Metadata
+    # 符合此规则的 watch 等长时间运行的请求将不会
+    # 在 RequestReceived 阶段生成审计事件。
+    omitStages:
+      - "RequestReceived"
+
+## ---------------------------------解答步骤：
+## 1) ssh root@master
+## 2) 配置审计策略
+cp /etc/kubernetes/logpolicy/sample-policy.yaml /tmp
+vi sample-policy.yaml 插入以下内容
+#这些内容，均可以从上面audit网页上找到。用到了3个审计级别：Request，RequestResponse，Metadata。
+
+  - level: RequestRespone #实现第1个要求。
+    resources:
+    - group: ""
+      resources: ["persistentvolumes"] 
+  - level: Resquest # 第2个要求。
+    resources:
+    - group: ""
+      resources: ["configmaps"] 
+      namespace: ["front-apps"]  //记得添加namespace关键字。
+  - level: Metadata #实现第3个要求。
+    resources:
+    - group: ""
+      resources: ["secrets","configmaps"]
+  - level: Metadata #实现第4个要求。
+    omitStages:
+      - "RequestReceived"
+
+
+## 3）配置master节点的api-server.yaml文件。以实现题目中要求的“”
+cp /etc/kubernetes/manifests/kube-apiserver.yaml /tmp
+vi kube-apiserver.yaml
+    - --authorization-mode=Node,RBAC #在这一行的后面加参数。如果考试中已经存在了则不要重复添加。
+    - --audit-policy-file=/etc/kubernetes/logpolicy/sample-policy.yaml #Policy文件路径。
+    - --audit-log-path=/var/log/kubernetes/audit-logs.txt #设置log文件路径
+    - --audit-log-maxage=10 #设置最长保留文件的时间
+    - --audit-log-maxbackup=2  #设置保留最多文件的数量
+## 4) 等待apiserver自动重启
+
+## 5）检查
+kubeclt get pod -A
+tail /var/log/kubernetes/audit-logs.txt #确认log文件中有内容，说明audit log配置成功。
